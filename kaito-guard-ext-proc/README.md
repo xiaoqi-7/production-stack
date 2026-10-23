@@ -68,6 +68,38 @@ The future adapter must handle `SSEParseError` through its explicit failure
 policy. These helpers do not enforce policies, scan content, implement
 holdback, or integrate the shared guardrail core.
 
+## Stream buffering helpers
+
+`ext_proc.streaming.logical_stream.LogicalStreamBuffer` accumulates decoded
+`delta.content` fragments. `append()` adds text, `get()` returns the accumulated
+text without consuming it, `clear()` resets it, and `flush_and_clear()` returns
+the text and resets the buffer in one synchronous call. `len(buffer)` counts
+Unicode code points, not UTF-8 bytes. The buffer is not thread-safe; callers own
+its lifetime and memory limits.
+
+`ext_proc.streaming.holdback` contains standalone fixed-string helpers:
+
+- `release_safe_prefix(pending, pattern_length)` returns `(safe, held)` with up
+  to `pattern_length - 1` characters held for the next chunk. The length must be
+  a positive integer; there is no assumed secret format or default length.
+- `detect_cross_boundary_pattern(held, new, pattern)` reports a nonempty literal
+  match only when it uses characters from both sides of the boundary. Matches
+  entirely within either input do not count; overlapping occurrences are checked.
+
+The name `safe` means outside the retained overlap, **not validated content**.
+A caller must scan `held + new` before releasing any prefix, handle a detection
+without forwarding it, and perform a final scan before flushing held text at EOF.
+For a literal of length L, retaining L-1 characters preserves every possible
+partial literal suffix for a subsequent scan. All lengths use the same Python
+string/code-point units; the guarantee does not cover arbitrary regexes,
+word-boundary rules, or model-based scanners. Multiple fixed literals require
+an overlap based on the longest literal.
+
+These helpers are not wired into `Process`, do not implement scanner execution
+or a GuardEngine, and do not replace the shared core's streaming safety API.
+They must be aligned with that API before production integration. Shared core
+integration and actual enforcement remain follow-up work.
+
 ## CI
 
 The `kaito-guard-ext-proc` job in the repository's CI workflow installs
